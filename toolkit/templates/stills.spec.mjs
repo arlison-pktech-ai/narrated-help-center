@@ -19,16 +19,20 @@ test("add-item", async ({ page }) => {
   const form = await dialog(page);
   await form.getByLabel("Name").fill("Garden hose");
   await blur(page);
+  // A button found by an internal selector (type=, name=, data-, a class)
+  // still works after its label changes: `name` checks the label the step
+  // names in bold, so a rename fails here instead of slipping into the help.
+  const save = form.locator("button[type=submit]");
   await mark(page, [
     { target: row(form, "Name"), n: 3 },
-    { target: form.getByRole("button", { name: "Save", exact: true }), n: 4 },
+    { target: save, n: 4, name: "Save" },
     { target: form.getByRole("button", { name: "Save and add another" }), n: "A" },
   ]);
   // Small forms are cropped (with every mark) so they stay readable.
   await shot(page, "add-item-2-form", { crop: "dialog" });
   await unmark(page);
 
-  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await save.click();
   await expect(page.locator(config.app.dialogSelector)).toHaveCount(0);
   const created = page.getByText("Garden hose").first();
   await center(created);

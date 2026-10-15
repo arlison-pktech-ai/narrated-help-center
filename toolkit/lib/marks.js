@@ -6,16 +6,19 @@
 // The drawing lives in a shadow root, so no stylesheet of the app reaches it.
 //
 // Items: { x, y, width, height, n?, label?, side?: "top"|"right"|"bottom"|"left",
-// pad?: number | { x, y }, badge?: "corner"|"left"|"right"|"top"|"bottom" }.
+// pad?: number | { x, y }, badge?: "corner"|"left"|"right"|"top"|"bottom", text? }.
 // Options: { width, height, color, dim, obstacles }.
 //
 // Layout, when an item does not say otherwise: a box grows 7 px around its
 // element, less when another marked element is close (stacked form rows,
 // tabs side by side), so boxes never overlap. The badge takes the first place
-// that covers no text, no field and no other mark (`obstacles`: the visible
-// text and fields of the screen): the top-left corner of a single element,
-// the left of stacked rows, above items side by side. A label goes to the
-// side asked for or, without one, to the side with room that covers the least.
+// that covers no text, no field, no icon, no button without text and no
+// other mark (`obstacles`: the visible text, fields, icons and icon buttons):
+// the top-left corner of a single element, the left of stacked rows, above
+// items side by side. It avoids covering its own element beyond the corner
+// of its box when the screen edge pushes it in (a target in a corner of the
+// screen). A label goes to the side asked for or, without one, to the side with room
+// that covers the least.
 // `dim` darkens everything but the boxes (an opacity such as .28; 0 for none).
 (() => {
   if (window.helpMarks) return;
@@ -68,12 +71,18 @@
   }
 
   // Where each badge goes: the first place (on screen) that covers no text,
-  // no field, no other box and no other badge, in the order that suits the
-  // item's neighbors; the least covered place when none is free.
-  function badges(boxes, items, { width, height, obstacles }) {
+  // no field, no control, no icon, no other box and no other badge, in the
+  // order that suits the item's neighbors; the least covered place when none
+  // is free. Covering its own element beyond the corner of the box costs too.
+  function badges(boxes, items, padding, { width, height, obstacles }) {
     const placed = [];
     return boxes.map((b, i) => {
       if (b.n == null) return null;
+      const own = items[i];
+      const allowed = Math.max(0, RADIUS - Math.hypot(Math.max(0, padding[i].x), Math.max(0, padding[i].y))) + 1;
+      // A control around the target, or inside a marked box, is the target or
+      // another mark: those count below, not as obstacles.
+      const blocking = obstacles.filter((rect) => !rect.control || !(within(rect, own) || boxes.some((box) => within(box, rect))));
       const near = (test) => items.some((other, j) => j !== i && test(items[i], other));
       const stacked = near((a, o) => overlapX(a, o) > a.width * 0.3 && gapY(a, o) >= 0 && gapY(a, o) < NEAR);
       const inRow = near((a, o) => overlapY(a, o) > a.height * 0.3 && gapX(a, o) >= 0 && gapX(a, o) < NEAR);
@@ -84,7 +93,8 @@
       });
       // Badges of a tight stack may touch rings, never cover each other's number.
       const cost = ({ x, y }) => (placed.some((p) => Math.hypot(p.x - x, p.y - y) < 30) ? 1e5 : 0)
-        + obstacles.reduce((sum, rect) => sum + Math.max(0, reach(x, y, RADIUS, rect) - 3), 0)
+        + Math.max(0, reach(x, y, RADIUS, own) - allowed)
+        + blocking.reduce((sum, rect) => sum + Math.max(0, reach(x, y, RADIUS, rect) - 3), 0)
         + boxes.reduce((sum, other, j) => sum + (j === i ? 0 : reach(x, y, RADIUS, other)), 0);
       const options = order.map(spot);
       const best = options.find((option) => cost(option) === 0) || options.reduce((a, c) => (cost(c) < cost(a) ? c : a));
@@ -119,8 +129,8 @@
       const end = Math.min(width - 4, item.x + item.width + padding[i].x), foot = Math.min(height - 4, item.y + item.height + padding[i].y);
       return { ...item, x, y, width: Math.max(8, end - x), height: Math.max(8, foot - y) };
     });
-    const spots = badges(boxes, items, { width, height, obstacles });
-    current = items.map((item) => ({ n: item.n ?? null, label: item.label ?? null }));
+    const spots = badges(boxes, items, padding, { width, height, obstacles });
+    current = items.map((item) => ({ n: item.n ?? null, label: item.label ?? null, text: item.text ?? null }));
 
     // Everything but the marked areas darker, so the eye goes there. A mask
     // keeps overlapping boxes clear.
@@ -214,9 +224,11 @@
     current = [];
   }
 
-  // The visible text and fields of a document (the page, or the app inside
-  // the video stage): what a badge or a label should not cover. Text hidden
-  // behind a dialog or a panel does not count.
+  // The visible text, fields, controls and icons of a document (the page, or
+  // the app inside the video stage): what a badge or a label should not
+  // cover. What is hidden behind a dialog or a panel does not count.
+  const CONTROLS = "a[href], button, summary, select, input[type=checkbox], input[type=radio], [role=button], [role=link], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=tab], [role=option], [role=checkbox], [role=radio], [role=switch]";
+  const ICONS = "svg, img, i, [class*=icon]";
   function textRects(doc = document) {
     const view = doc.defaultView, out = [];
     const onScreen = (r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < view.innerHeight && r.left < view.innerWidth;
@@ -236,6 +248,20 @@
     for (const field of doc.querySelectorAll("input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea, select")) {
       const r = field.getBoundingClientRect();
       if (onScreen(r) && r.width > 24 && r.height > 16 && seen(field, r)) out.push({ x: r.left + 8, y: r.top + 6, width: r.width - 16, height: r.height - 12 });
+    }
+    // Buttons, links, checkboxes and tabs without text, whole: a badge on
+    // the X beside a button reads as part of it (the text of the others is
+    // already here). Big clickable areas (a card, a row) stay out.
+    for (const control of doc.querySelectorAll(CONTROLS)) {
+      if (control.closest("#help-marks-host") || control.innerText?.trim()) continue;
+      const r = control.getBoundingClientRect();
+      if (onScreen(r) && r.width <= 480 && r.height <= 120 && seen(control, r)) out.push({ x: r.left, y: r.top, width: r.width, height: r.height, control: true });
+    }
+    // Icons have no text: an icon-font glyph, an SVG, a small picture.
+    for (const icon of doc.querySelectorAll(ICONS)) {
+      if (icon.closest("#help-marks-host") || icon.parentElement?.closest("svg")) continue;
+      const r = icon.getBoundingClientRect();
+      if (onScreen(r) && r.width <= 48 && r.height <= 48 && seen(icon, r)) out.push({ x: r.left, y: r.top, width: r.width, height: r.height });
     }
     return out;
   }

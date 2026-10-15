@@ -3,7 +3,7 @@
 ## Contents
 
 1. Demo data and determinism
-2. `support.mjs`: the shared fixture
+2. `support.mjs`: the shared fixture (and apps that never go quiet)
 3. Picture helpers
 4. Writing a stills spec
 5. Marking and cropping
@@ -67,6 +67,17 @@ Reset shared data in the same place: `await page.request.post("/api/reset")` (or
 
 A tutorial that shows an external window (OAuth, a bank, an email): mock the API before and after it, and in videos use `g.card("In the bank's window", "Sign in and authorize. Then come back.")` instead of showing the other company's screen.
 
+**Apps that never go quiet.** Every screen waits for the network to go quiet, at most `app.idleTimeout` (3000 ms; `0` skips the wait). An app with a long-lived request — a realtime bus, live notifications, chat presence — never goes quiet, so each `settle()` and each video stage pays the full wait, and the run prints once: "The network of … did not go quiet in 3000 ms". The screens still come out right (the ready and loading selectors decide that); turn the realtime part off in `support.mjs` to get the speed back. It only feeds live updates the tutorials do not show:
+
+| The app keeps open | Turn it off in the fixture |
+| --- | --- |
+| A `SharedWorker` (Odoo 17/18's bus: its script request never ends for Playwright; the app falls back to a plain Worker) | `await page.context().addInitScript(() => { delete window.SharedWorker; });` |
+| Server-sent events (`EventSource`) | `addInitScript(() => { delete window.EventSource; })` when the app checks for it, or abort the stream: `context.route("**/events**", (r) => r.abort())` |
+| Long polling (Odoo ≤ 16 `/longpolling/poll`, Socket.IO's polling fallback) | abort that route, e.g. `context.route("**/longpolling/**", (r) => r.abort())` |
+| A websocket to a third-party service (Pusher, Ably, Firebase) | already blocked when the fixture aborts other origins; otherwise `context.routeWebSocket(/pusher|ably/, (ws) => ws.close())` |
+
+Confirm the fix: the warning is gone and `npm run help:stills` takes seconds per tutorial again (the Odoo lab: 24 s instead of 1.2 min). Raise `idleTimeout` only for an app whose first load is slow; lower it (or set `0`) when the ready selector alone is reliable.
+
 ## 3. Picture helpers
 
 Imported from `support.mjs` (they live in `lib/capture.mjs`):
@@ -74,13 +85,14 @@ Imported from `support.mjs` (they live in `lib/capture.mjs`):
 | Helper | Does |
 | --- | --- |
 | `open(page, route, ms?)` | goes to `route` with `app.query` appended, then `settle()` |
-| `settle(page, ms = 450)` | network idle, fonts loaded, `readySelector` visible, `loadingSelector` gone, a short pause |
+| `settle(page, ms = 450)` | network quiet (at most `app.idleTimeout`), fonts loaded, `readySelector` visible, `loadingSelector` gone, a short pause; a screen without `readySelector` after 15 s fails the test ("Screen not ready (picture)…"), the same wait and message as the video stage |
 | `dialog(page, selector?)` | the open dialog after its entrance animation (`app.dialogSelector`) |
 | `still(locator)` | waits until a menu/popover/sheet finished animating |
-| `mark(page, items, { dim })` | draws boxes, badges and labels laid out automatically; items `{ target, n?, label?, side?, badge?, pad? }`, target a locator or CSS selector; `dim` (true, false or an opacity) overrides `marks.dim` |
+| `mark(page, items, { dim })` | draws boxes, badges and labels laid out automatically; items `{ target, n?, label?, side?, badge?, pad?, name? }`, target a locator or CSS selector; `name` checks the label the target shows (see `named`); `dim` (true, false or an opacity) overrides `marks.dim` |
+| `named(locator, "Save")` | fails unless the target's visible text is exactly that label (an icon-only button: its accessible name, from `aria-label` or `title`); returns the locator. For buttons the text names but no mark points at (extras, Done, Problems) |
 | `unmark(page)` | removes the marks (do it before clicking) |
 | `shot(page, name, { crop, margin })` | saves `img/<name>.jpg` (and the numbers drawn, for the check); `crop`: `"dialog"`, a locator, a selector or `{ x, y, width, height }` |
-| `row(scope, "Label")` | the form row of the label with that exact text — its `app.fieldSelector` ancestor, or the closest element holding the label and a field (works when the label wraps its field, unlike `getByText`/`getByLabel` with `exact`) |
+| `row(scope, "Label")` | the form row of the label with that exact text — its `app.fieldSelector` ancestor, or the closest element holding the label and a field (works when the label wraps its field, unlike `getByText`/`getByLabel` with `exact`). A row with `display: contents` (the label and field cells of a CSS grid, like Odoo 18's `.o_wrap_field`) is marked, cropped and scrolled by the box around its visible cells |
 | `center(locator)` | scrolls a part of the page to the middle |
 | `blur(page)` | removes focus ring and caret after typing |
 
@@ -117,7 +129,7 @@ test("add-task", async ({ page }) => {
 });
 ```
 
-Selectors: prefer what the user sees — `getByRole(…, { name })`, `getByLabel`, `getByText` — so a renamed button fails loudly and the text gets updated too. Fall back to stable attributes (`data-testid`, `data-action`) for icon buttons and repeated elements. When an action changes data (save, delete), later tests still start fresh (each test has its own context; the demo mode resets).
+Selectors: prefer what the user sees — `getByRole(…, { name })`, `getByLabel`, `getByText` — so a renamed button fails loudly and the text gets updated too. Fall back to stable attributes (`data-testid`, `data-action`, `name=`) for icon buttons and repeated elements — and then give the mark a `name` (`{ target: page.locator("button[name=action_confirm]"), n: 10, name: "Confirm" }`): an internal selector keeps finding the button after its label changes ("Confirm" → "Close the sale"), and without the check the picture shows the new label next to the old one in the text while every test passes. `build.mjs` also warns when the text a marked button showed differs from the bold label of its step. When an action changes data (save, delete), later tests still start fresh (each test has its own context; the demo mode resets).
 
 Phone pictures (`phone.spec.mjs`) run at 390 × 844 with touch; the layout keeps the boxes of a bottom bar on screen and their badges off the labels.
 
@@ -125,7 +137,7 @@ Phone pictures (`phone.spec.mjs`) run at 390 × 844 with touch; the layout keeps
 
 - One block, one picture, exactly the block's numbers. Extras (A, B) on the same picture.
 - One label with an arrow for the main action of the picture (two at most). Labels are imperative and short: "Click + New task", "Choose the type", "Your new task".
-- **The layout is automatic.** Each box grows 7 px around its element, less when another marked element is close (half the gap), so stacked rows, menu items and tabs never get overlapping boxes, and boxes stay inside the screen. Each badge takes the first free place among the corner, the left, above, the right and below — free meaning it covers no visible text, no field and no other mark — in the order that suits its neighbors (stacked rows: left first; items side by side: above first). A label goes to `side` when given and it fits, otherwise to the side with room that covers the least.
+- **The layout is automatic.** Each box grows 7 px around its element, less when another marked element is close (half the gap), so stacked rows, menu items and tabs never get overlapping boxes, and boxes stay inside the screen. Each badge takes the first free place among the corner, the left, above, the right and below — free meaning it covers no visible text, no field, no icon, no button without text (the X beside a save button) and no other mark — in the order that suits its neighbors (stacked rows: left first; items side by side: above first). It avoids sliding onto its own target: a target at the edge of the screen (an apps-grid icon in the corner) gets its badge beside it when there is room. On a crowded bar with no free place (a top menu), the badge takes the least covered one; choose it with `badge` if you prefer another. A label goes to `side` when given and it fits, otherwise to the side with room that covers the least.
 - Override only what still looks wrong after looking at the picture: `badge` (`"corner"`, `"left"`, `"right"`, `"top"`, `"bottom"`) and `pad` (`7`, `-2`, `{ x: 7, y: 4 }`) per item.
 - First picture of a tutorial: the whole screen. Next ones: `crop: "dialog"` or a locator (a panel, a menu with `margin: 60`). The crop always includes every mark and keeps 28 px of margin.
 - Before every `shot()`, the screen must be still: dialogs finished opening (`dialog()`), menus open (`still()`), toasts hidden (`hideSelectors`), focus removed (`blur()`).
@@ -140,6 +152,10 @@ Phone pictures (`phone.spec.mjs`) run at 390 × 844 with touch; the layout keeps
 | Marks missing on an app with a Content-Security-Policy | `bypassCSP: true` in `playwright.config.mjs` (the template sets it): the marks are injected into the page. |
 | A date field shows the wrong format (03/10 vs 10/03) | Native date fields follow the browser's language: `launchOptions.args: ["--lang=pt-BR"]` (the template derives it from `language`). |
 | `row()` finds nothing | The label text is not exactly the given text (a trailing `*`, a nested span): pass the visible text, or mark the field with `getByLabel(…)` / a CSS selector. |
+| Every test hangs until the 5-minute timeout, or each screen takes 3 s more | A realtime connection keeps the network busy: see "Apps that never go quiet" (section 2). |
+| "Screen not ready (picture)" or "(video stage)" | `app.readySelector` did not appear in 15 s: the page did not open (a redirect, a sign-in page, a server error), or the selector does not exist on every screen the tutorials open — use one that every screen has. |
+| `named()` / `name` fails: "The help says **X**, but the screen shows something else" | The label changed in the app: update the step text, the captions and the arrow labels, then the `name`. If the button only has an icon, its accessible name (`aria-label`/`title`) is compared. |
+| `build.mjs` warns "names **X**, but the button it marks … reads "Y"" | Same cause, found from the last pictures; the bold label must be the text on the button. |
 | Marks under a dialog | The dialog is not modal (no top layer). Marks still draw in the top layer; if the app's dialog is a portal with a huge `z-index`, it stays below the popover anyway. |
 | `locator.waitFor: Timeout` in `mark()` | The target is hidden or not rendered yet: open the menu first, scroll with `center()`, or fix the selector. |
 | Picture shows a toast or cookie banner | Add its selector to `app.hideSelectors`, or dismiss it through `app.storage`. |

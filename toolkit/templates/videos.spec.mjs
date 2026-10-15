@@ -20,7 +20,8 @@ video("01-add-item", async (page, name) => {
   await g.zoom();
   await g.step(2, "Write the **name**. Example: Garden hose.", form.getByLabel("Name"), { act: () => g.type("Garden hose") });
   g.poster();
-  await g.step(3, "Click **Save**.", form.getByRole("button", { name: "Save", exact: true }), { after: 300 });
+  // name: true checks that the button reads the caption's bold label.
+  await g.step(3, "Click **Save**.", form.locator("button[type=submit]"), { after: 300, name: true });
   await g.reset();
   await g.hold(600);
   await g.show("Done! The new item is at the top of the list.", [{ target: g.app.getByText("Garden hose").first(), label: "Your new item", side: "right" }], { hold: 3000 });

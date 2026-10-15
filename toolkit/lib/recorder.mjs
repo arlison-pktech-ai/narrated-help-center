@@ -5,7 +5,7 @@
 // its iframe like on any page: same cookies, same storage, nothing changed.
 import { readFile, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { expect } from "@playwright/test";
+import { ready, rectOf } from "./capture.mjs";
 import { appPath, config, fromRoot, LIB } from "./config.mjs";
 
 const STAGE = path.join(LIB, "stage");
@@ -60,10 +60,7 @@ export async function openStage(page, { device = "desktop", theme = config.video
   await page.evaluate((src) => window.stage.load(src), appPath(route));
   const app = page.frames().find((frame) => frame.parentFrame() === page.mainFrame());
   if (!app) throw Error("The app did not open inside the stage. Check config.app.baseURL and the framing headers.");
-  await app.waitForLoadState("networkidle").catch(() => {});
-  await app.evaluate(() => document.fonts.ready);
-  if (config.app.readySelector) await app.locator(config.app.readySelector).first().waitFor({ timeout: 15000 });
-  if (config.app.loadingSelector) await expect(app.locator(config.app.loadingSelector)).toHaveCount(0, { timeout: 15000 }).catch(() => {});
+  await ready(app, "video stage");
   await page.waitForTimeout(900);
   await page.evaluate(([top, bottom]) => window.stage.paintPhone(top, bottom), [config.app.phoneTopSelector, config.app.phoneBottomSelector]);
   return new Recorder(page, app, device, theme);
@@ -119,7 +116,9 @@ export class Recorder {
   async box(target) {
     const locator = this.locate(target);
     await locator.waitFor({ state: "visible" });
-    return locator.evaluate((node) => { const r = node.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; });
+    const box = await locator.evaluate(rectOf);
+    if (!box) throw Error(`No position on the screen for ${locator}`);
+    return box;
   }
 
   async point(target, { dx = 0.5, dy = 0.5 } = {}) {

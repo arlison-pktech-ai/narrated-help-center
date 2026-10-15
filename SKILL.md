@@ -55,6 +55,7 @@ Media in batches costs time and money. **Stop for the user's OK at the two check
 
 - One action per step. Where first, then what: "In the menu, click **Projects**." / "In **Due date**, choose the day it must be done."
 - **Bold** = the exact label on screen (button, field, menu item, tab). Never "click the button" or "the save option".
+- When a spec finds a button by an internal selector (`button[name=action_confirm]`, a `data-` attribute, a class), give it the bold label to check: `{ target, n, name: "Confirm" }` in `mark()`, `{ name: true }` in `g.step()` (the caption's bold), `named(locator, "Send")` for buttons named outside the steps. A rename then fails the run instead of leaving the old label in the text; `build.mjs` also warns when a marked button reads something other than its step's bold.
 - Short sentences, everyday words, second person, present tense. Explain a toggle by its effect ("**Paid** on means the money already left").
 - Give an example value for every typed field ("Example: Garden") and type that same value in the pictures and videos.
 - Numbers run 1, 2, 3… across the pictures of a part; a new part may restart at 1. Letters (A, B) for optional extras shown on the same picture.
@@ -63,7 +64,7 @@ Media in batches costs time and money. **Stop for the user's OK at the two check
 
 ## Marking a picture
 
-`mark(page, [{ target, n }, …])` lays the marks out by itself: boxes shrink between close neighbors so they never overlap and stay on screen; each badge goes where it covers no text, no field and no other mark (the corner of a lone button, the left of stacked form rows and menu items, above tabs side by side); a label goes to the side with room that covers the least. What is left to decide:
+`mark(page, [{ target, n }, …])` lays the marks out by itself: boxes shrink between close neighbors so they never overlap and stay on screen; each badge goes where it covers no text, no field, no icon, no icon button and no other mark, and avoids sliding onto its own target (the corner of a lone button, the left of stacked form rows and menu items, above tabs side by side, beside an icon in the screen corner); a label goes to the side with room that covers the least. What is left to decide:
 
 | Need | How |
 | --- | --- |
@@ -71,6 +72,7 @@ Media in batches costs time and money. **Stop for the user's OK at the two check
 | "Look here", no step | `{ target, label: "Your new task" }` (no `n`) |
 | A small target on a big screen | `shot(page, name, { crop: locator })` — the crop always keeps every mark |
 | Focus on the marks (optional look) | `marks.dim: true` darkens everything but the boxes (28 % in pictures, 14 % in videos), or `{ pictures: true, videos: false }`; one call: `{ dim: true }` |
+| A button found by `name=`, `data-` or a class | `{ target, n, name: "Confirm" }`: fails if the button no longer reads the step's bold label |
 | A picture that still looks wrong | per item `badge: "corner" \| "left" \| "right" \| "top" \| "bottom"` and `pad: number \| { x, y }` |
 
 Mark exactly the numbers of the block's steps — `build.mjs` fails on a step number missing from its picture and warns on a drawn number no step explains. Look at every picture before moving on.
@@ -110,7 +112,7 @@ await g.stop();
 | Try the darkened look | `HELP_DIM=1 npm run help:stills` (or `HELP_DIM=pictures`, `HELP_DIM=videos`) |
 | Cost before a batch | `node scripts/help/lib/voice.mjs --estimate` (after a `HELP_VOICE=off` run) |
 | Covers, page, checks | `node scripts/help/lib/covers.mjs` · `node scripts/help/lib/build.mjs [--strict] [--publish [dir]]` |
-| Update the toolkit | `node <this skill>/scripts/scaffold.mjs --dir scripts/help --update` |
+| Update the toolkit | `node <this skill>/scripts/scaffold.mjs --dir scripts/help --update` (also after changing `app.phone`: it refreshes `help:stills`) |
 
 ## Common mistakes
 
@@ -119,6 +121,8 @@ await g.stop();
 | Screenshots taken by hand or from a real account | Specs on demo data: regenerable and private |
 | Text numbers that drift from the pictures | Mark the block's numbers; run `build.mjs --strict` |
 | "Click the button", several actions in one step | The exact label in bold, one action per step |
+| A button found by an internal selector (`name=`, a class) with nothing checking its label | `name` in `mark()`/`step()` or `named()`: the run fails when the label changes, instead of the help keeping the old one |
+| Tests that hang or crawl on an app with live updates | Turn off its realtime connection in `support.mjs` (`references/capture.md`, "Apps that never go quiet") |
 | Marking every control on a busy screen | Only the steps of that block; crop to the region |
 | Dates that change every run ("3 days late") | `now` fixed in the config, demo data relative to it |
 | Narrating all videos before the voice is approved | Sample → pilot → estimate → batch |

@@ -8,6 +8,7 @@
 // for the narrator to finish the previous one.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { named } from "./capture.mjs";
 import { config, dimFor, FRAMES, LIB, strings } from "./config.mjs";
 import { openStage } from "./recorder.mjs";
 import { NARRATION, SCRIPTS, sentences, speak, spoken } from "./voice.mjs";
@@ -16,6 +17,8 @@ const MARKS = path.join(LIB, "marks.js");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Captions accept **bold** (like the help text) or <b>bold</b>.
 const html = (text) => String(text ?? "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+// The label a caption names: its last bold part.
+const boldOf = (text) => [...html(text).matchAll(/<b>(.+?)<\/b>/g)].map((match) => match[1]).at(-1);
 
 export async function openGuide(page, options = {}) {
   const stage = await openStage(page, options);
@@ -127,11 +130,13 @@ export class Guide {
   locate(target) { return this.s.locate(target); }
 
   // `dim` (true, false or an opacity) darkens the rest of the app; by default
-  // it follows config.marks.dim for videos.
+  // it follows config.marks.dim for videos. An item's `name` checks the label
+  // its target shows (named()).
   async mark(items, { dim } = {}) {
     const boxes = [];
     for (const item of items) {
       const locator = this.locate(item.target);
+      if (item.name) await named(locator, item.name);
       const box = await this.s.box(locator);
       boxes.push({ ...box, n: item.n, label: item.label, side: item.side, badge: item.badge, pad: item.pad });
     }
@@ -150,16 +155,24 @@ export class Guide {
   // pause to read and hear it, and the click (or `act`, for typing and
   // choosing). The action comes after the sentence that names it (the one in
   // bold); the rest of the caption is heard while the screen answers.
-  async step(n, text, target, { label, side, badge, dim, click = true, act, hold = 1400, after = 800 } = {}) {
+  // `name: true` checks, before the caption, that the target shows the bold
+  // label of the caption (the last one, when there are several); a string
+  // checks that label instead.
+  async step(n, text, target, { label, side, badge, dim, click = true, act, hold = 1400, after = 800, name } = {}) {
     const locator = this.locate(target);
     await locator.waitFor({ state: "visible" });
+    if (name) {
+      const expected = name === true ? boldOf(text) : name;
+      if (!expected) throw Error(`Step ${n}: name: true needs a **bold** label in the caption.`);
+      await named(locator, expected);
+    }
     const caption = html(text);
     const clip = await this.say(`<span class="step">${strings.step} ${n}</span>${caption}`);
     await this.s.reveal(locator);
     await this.s.move(locator, 850);
     await this.mark([{ target: locator, n, label, side, badge }], { dim });
-    const named = Math.max(0, sentences(caption).findIndex((sentence) => sentence.includes("<b>")));
-    await wait(Math.max(hold, this.left(clip, named) + 150));
+    const naming = Math.max(0, sentences(caption).findIndex((sentence) => sentence.includes("<b>")));
+    await wait(Math.max(hold, this.left(clip, naming) + 150));
     // The box leaves before the click: the click may close what it marks.
     await this.unmark();
     if (click) await this.s.click(locator, 300);

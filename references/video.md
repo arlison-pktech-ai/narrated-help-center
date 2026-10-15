@@ -28,8 +28,8 @@ Desktop videos are 1920 × 1080 with the app at 1440 × 900; phone videos are 10
 | `g.app` | the app's frame: build locators with `g.app.getByRole(...)`, `g.app.locator(...)` |
 | `g.record(name)` / `g.stop()` | start and finish the recording (`name` = the `video.file` of the content) |
 | `g.title(title, subtitle)` | opening card with the logo; read aloud |
-| `g.step(n, text, target, { click = true, act, label, side, badge, dim, hold = 1400, after = 800 })` | caption "Step n" + text, pointer to the target, red box with badge `n`, wait for the bold sentence, click and/or `act(locator)` |
-| `g.show(text, targets, { hold = 2600, move = true, dim })` | caption + boxes/labels without clicking; `targets`: a locator, a selector or `[{ target, label, side, n }]` |
+| `g.step(n, text, target, { click = true, act, label, side, badge, dim, hold = 1400, after = 800, name })` | caption "Step n" + text, pointer to the target, red box with badge `n`, wait for the bold sentence, click and/or `act(locator)`; `name: true` first checks that the target shows the caption's bold label (the last one when there are two), a string checks that label (an icon button: `name: "Save manually"`, its accessible name) |
+| `g.show(text, targets, { hold = 2600, move = true, dim })` | caption + boxes/labels without clicking; `targets`: a locator, a selector or `[{ target, label, side, n, name }]` |
 | `g.say(text)` / `g.say(null)` | a caption alone (e.g. "Wait for the answer…") / hide the caption |
 | `g.card(title, subtitle, ms = 3600)` | a full-stage card mid-video, for what happens outside the app |
 | `g.zoom(target = dialogSelector, level = 1.25)` | camera closer on a dialog, a form or a panel, never so close that it does not fit above the caption |
@@ -116,7 +116,9 @@ test.describe("phone", () => {
 | "The app did not open inside the stage" | Wrong `app.baseURL`, or the app redirects the iframe to another origin (SSO). Sign in before (storageState) or point `route` to a page that does not redirect. |
 | The app shows "open in a new window" or breaks in the iframe | Frame-busting code (`top !== self`): add a demo flag that skips it, or record that screen with a `card()`. |
 | Clicks land in the wrong place | The camera is still moving: `g.zoom()`/`g.reset()` finish before the next call; avoid scrolling inside the app while zoomed. |
-| A badge covers a label in a video | The same automatic layout as the pictures runs on the app's text; force a side with `step(…, { badge: "left" })`. |
+| A badge covers a label in a video | The same automatic layout as the pictures runs on the app's text, icons and icon buttons; force a side with `step(…, { badge: "left" })`. |
+| "Screen not ready (video stage)" | Same wait as the pictures: `app.readySelector` must appear on the first screen of the video (`route`). |
+| "The help says **X**, but the screen shows something else" | A `name` check: the button's label changed. Update the caption (and `content.mjs`). |
 | Long silences while typing | Type less (shorter examples), raise the delay only for amounts, or split the step. |
 | A caption waits too long | It is too long to read aloud: shorten it; put explanations in `show()` with their own caption. |
 | The video is cut too early | Call `g.end()` (it waits for the narration) before `g.stop()`. |

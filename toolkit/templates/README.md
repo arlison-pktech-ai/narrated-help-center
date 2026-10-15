@@ -36,6 +36,6 @@ HELP_VOICE=system npm run help                                                  
 
 ## When the app changes
 
-Run `npm run help` again. A selector that no longer exists fails the tutorial that uses it; `build.mjs` lists missing pictures, videos and numbers out of step. To redo only some videos: `HELP_VIDEOS=02,05 npx playwright test -c scripts/help/playwright.config.mjs --project=videos`, then `node scripts/help/lib/encode.mjs 02 05`, `node scripts/help/lib/covers.mjs` and `node scripts/help/lib/build.mjs`. Only the pictures: `npm run help:stills`.
+Run `npm run help` again. A selector that no longer exists fails the tutorial that uses it, and so does a button whose label no longer matches its `name` check; `build.mjs` lists missing pictures, videos, numbers out of step and marked buttons that no longer read their step's bold label. To redo only some videos: `HELP_VIDEOS=02,05 npx playwright test -c scripts/help/playwright.config.mjs --project=videos`, then `node scripts/help/lib/encode.mjs 02 05`, `node scripts/help/lib/covers.mjs` and `node scripts/help/lib/build.mjs`. Only the pictures: `npm run help:stills`.
 
 Videos need an `ffmpeg` with libx264 (`brew install ffmpeg`, `npm i -D ffmpeg-static`, or `FFMPEG=/path`). Raw frames take about 150 MB per minute until `encode.mjs` deletes them (`KEEP_FRAMES=1` keeps them).
