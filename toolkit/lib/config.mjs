@@ -27,6 +27,9 @@ const DEFAULTS = {
     query: "",
     readySelector: "body",
     loadingSelector: null,
+    // The longest wait for the network to go quiet on each screen, in ms (0:
+    // no wait). Realtime connections keep some apps busy forever.
+    idleTimeout: 3000,
     dialogSelector: "dialog[open]",
     fieldSelector: null,
     hideSelectors: [],

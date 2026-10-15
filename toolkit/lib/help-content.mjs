@@ -1,6 +1,7 @@
 // The project's help text (content.mjs) and the checks that keep it honest:
-// ids and links that resolve, step numbers in order, and every step number
-// drawn on the picture it sits next to.
+// ids and links that resolve, step numbers in order, every step number
+// drawn on the picture it sits next to, and the button each number points at
+// showing the label the step names in bold.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -33,6 +34,10 @@ const textsOf = (content) => [
   ...content.FAQ.flatMap((group) => group.items.flat()),
   ...content.GLOSSARY.map(([, meaning]) => meaning),
 ].filter(Boolean);
+
+// Labels compared loosely: case, accents' composition, symbols and spacing
+// aside ("+ New item" names a button that reads "New item").
+const loose = (text) => String(text).normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 const manifest = (image) => {
   const file = path.join(IMG, `${image}.json`);
@@ -85,12 +90,21 @@ export function checkContent(content, { files = true } = {}) {
   ];
   for (const { where, guide, block } of pictures) {
     if (!existsSync(path.join(IMG, `${block.image}.jpg`))) { add("error", where, `missing picture img/${block.image}.jpg`); continue; }
-    const drawn = manifest(block.image)?.marks;
+    const shot = manifest(block.image), drawn = shot?.marks;
     if (!drawn) continue;
     const said = [...(block.steps || []), ...(block.extras || [])].map((step) => String(step.n));
     const shown = drawn.map(String);
     const absent = said.filter((n) => !shown.includes(n));
     if (absent.length) add("error", `${where}, img/${block.image}.jpg`, `the text has step ${absent.join(", ")} but the picture does not show ${absent.length > 1 ? "these numbers" : "this number"}`);
+    // A button found by an internal selector keeps working after its label
+    // changes: the step must still name, in bold, what the button reads.
+    for (const step of [...(block.steps || []), ...(block.extras || [])]) {
+      const reads = shot.named?.[String(step.n)];
+      const bold = [...String(step.text || "").matchAll(/\*\*(.+?)\*\*/g)].map((match) => match[1]);
+      if (reads && bold.length && !bold.some((label) => loose(reads).includes(loose(label)))) {
+        add("warning", `${where}, step ${step.n}`, `names ${bold.map((label) => `**${label}**`).join(", ")}, but the button it marks on img/${block.image}.jpg reads "${reads}"`);
+      }
+    }
     if (guide) {
       const all = blocksOf(guide).flatMap((other) => [...(other.steps || []), ...(other.extras || [])]).map((step) => String(step.n));
       const orphan = shown.filter((n) => !all.includes(n));

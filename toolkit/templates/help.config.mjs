@@ -15,8 +15,9 @@ export default {
   app: {
     baseURL: "http://127.0.0.1:5173",  // TODO: where playwright.config.mjs serves the app
     query: "demo=1",                // TODO: demo/fixture mode appended to every path ("" if the data comes from a seed)
-    readySelector: "main",          // present when a screen is drawn
+    readySelector: "main",          // present on every screen once drawn; a screen without it fails the test
     loadingSelector: null,          // e.g. "[aria-busy=true], .skeleton": must be gone before a picture
+    idleTimeout: 3000,              // longest wait (ms) for the network to go quiet; a realtime app never does (support.mjs)
     dialogSelector: "dialog[open]", // e.g. "[role=dialog]" for Radix/shadcn, ".modal.show" for Bootstrap
     fieldSelector: null,            // a form row (label + input), e.g. ".field"; row() falls back to the label's parent
     hideSelectors: [],              // toasts, cookie banners, dev overlays: hidden in pictures

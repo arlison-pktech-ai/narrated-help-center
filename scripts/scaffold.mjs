@@ -4,11 +4,12 @@
 // lib/ is the shared toolkit (replaced by --update); the templates (config,
 // content, Playwright fixtures and specs, README) are copied only when absent,
 // because they become the project's own files. Also adds the output folder to
-// .gitignore and the npm scripts, when missing.
+// .gitignore and the npm scripts, when missing; `help:stills` follows
+// `app.phone` of the project's help.config.mjs (run --update after changing it).
 import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const skill = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -24,6 +25,19 @@ if (!existsSync(path.join(root, "package.json"))) {
   process.exit(1);
 }
 
+// Phone pictures only when the app works on phones (app.phone, true until the
+// project's help.config.mjs says otherwise): without it the playwright config
+// defines no "phone" project, and naming it is an error.
+let phone = true;
+const configFile = path.join(target, "help.config.mjs");
+if (existsSync(configFile)) {
+  try {
+    phone = (await import(pathToFileURL(configFile).href)).default?.app?.phone !== false;
+  } catch (error) {
+    console.warn(`Could not read ${dir}/help.config.mjs (${error.message}); assuming app.phone: true.`);
+  }
+}
+
 await mkdir(target, { recursive: true });
 const lib = path.join(target, "lib");
 if (!existsSync(lib) || update) {
@@ -32,7 +46,7 @@ if (!existsSync(lib) || update) {
 }
 for (const file of await readdir(path.join(skill, "toolkit/templates"))) {
   const destination = path.join(target, file);
-  if (existsSync(destination)) continue;
+  if (existsSync(destination) || (file === "phone.spec.mjs" && !phone)) continue;
   await cp(path.join(skill, "toolkit/templates", file), destination);
   done.push(`added ${path.relative(root, destination)}`);
 }
@@ -45,23 +59,26 @@ if (!/^\/?\.help-center\/?$/m.test(ignored)) {
   done.push("added .help-center/ to .gitignore");
 }
 
-// npm scripts, without touching existing ones.
+// npm scripts, without touching existing ones, except a help:stills this
+// script wrote for the other phone setting.
 const pkgFile = path.join(root, "package.json");
 const pkg = JSON.parse(readFileSync(pkgFile, "utf8"));
 const config = `${dir}/playwright.config.mjs`;
+const stills = (withPhone) => `playwright test -c ${config} --project=stills${withPhone ? " --project=phone" : ""} && node ${dir}/lib/build.mjs`;
 const scripts = {
   help: `playwright test -c ${config} && node ${dir}/lib/encode.mjs && node ${dir}/lib/covers.mjs && node ${dir}/lib/build.mjs`,
-  "help:stills": `playwright test -c ${config} --project=stills --project=phone && node ${dir}/lib/build.mjs`,
+  "help:stills": stills(phone),
   "help:videos": `playwright test -c ${config} --project=videos && node ${dir}/lib/encode.mjs && node ${dir}/lib/covers.mjs && node ${dir}/lib/build.mjs`,
   "help:build": `node ${dir}/lib/build.mjs`,
 };
 pkg.scripts ||= {};
 const added = Object.entries(scripts).filter(([name]) => !pkg.scripts[name]);
 for (const [name, command] of added) pkg.scripts[name] = command;
-if (added.length) {
-  await writeFile(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
-  done.push(`added npm scripts: ${added.map(([name]) => name).join(", ")}`);
-}
+const switched = pkg.scripts["help:stills"] === stills(!phone);
+if (switched) pkg.scripts["help:stills"] = stills(phone);
+if (added.length || switched) await writeFile(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
+if (added.length) done.push(`added npm scripts: ${added.map(([name]) => name).join(", ")}`);
+if (switched) done.push(`help:stills now ${phone ? "includes" : "skips"} the phone pictures (app.phone: ${phone})`);
 
 const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 console.log(done.length ? done.map((line) => `• ${line}`).join("\n") : "Nothing to do: the toolkit is already here (use --update to refresh lib/).");
